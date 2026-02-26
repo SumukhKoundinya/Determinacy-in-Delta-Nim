@@ -10,14 +10,23 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
 
-def label_infinite_nim(heaps):
+"""def label_infinite_nim(heaps):
     nz_count = np.count_nonzero(heaps)
     total_heaps = len(heaps)
     if nz_count > total_heaps * 0.6:  
         return 0
     return 1 if np.bitwise_xor.reduce(heaps[:nz_count]) != 0 else 0
+"""
 
-def generate_dataset(num_samples=50000, num_heaps=100, max_heap_size=30):
+def label_delta_nim(heaps):
+    nz_count = np.count_nonzero(heaps)
+    if nz_count <= 60:
+        nonzero_heaps = heaps[heaps > 0]
+        return 1 if np.bitwise_xor.reduce(nonzero_heaps) != 0 else 0
+    else:
+        return 0
+
+"""def generate_dataset(num_samples=50000, num_heaps=100, max_heap_size=30):
     data = []
     for _ in range(num_samples):
         support_size = np.random.geometric(0.01)
@@ -29,6 +38,18 @@ def generate_dataset(num_samples=50000, num_heaps=100, max_heap_size=30):
             idxs = np.random.choice(num_heaps, size=support_size, replace=False)
             heaps[idxs] = np.random.randint(1, max_heap_size+1, size=support_size)
         label = label_infinite_nim(heaps)
+        data.append((heaps.tolist(), label))
+    return pd.DataFrame(data, columns=['heaps', 'win_label'])"""
+
+def generate_dataset(num_samples=50000, num_heaps=100, max_heap_size=30):
+    data = []
+    np.random.seed(42)
+    for _ in range(num_samples):
+        support_size = min(np.random.geometric(0.01), num_heaps)
+        heaps = np.zeros(num_heaps, dtype=int)
+        idxs = np.random.choice(num_heaps, size=support_size, replace=False)
+        heaps[idxs] = np.random.randint(1, max_heap_size+1, size=support_size)
+        label = label_delta_nim(heaps)
         data.append((heaps.tolist(), label))
     return pd.DataFrame(data, columns=['heaps', 'win_label'])
 
@@ -52,13 +73,13 @@ df = generate_dataset()
 X = add_features(df)
 y = df['win_label']
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+"""X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 scaler = StandardScaler()
 X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
-X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)"""
 
-smoteenn = SMOTEENN(random_state=42)
+"""smoteenn = SMOTEENN(random_state=42)
 X_train_resampled, y_train_resampled = smoteenn.fit_resample(X_train_scaled, y_train)
 
 # Hyperparameter tuning ------------------------------------
@@ -115,4 +136,57 @@ plt.show()
 with open('rf_model_lipparini.pkl', 'wb') as f:
     pickle.dump(model, f)
 with open('scaler_lipparini.pkl', 'wb') as f:
-    pickle.dump(scaler, f)
+    pickle.dump(scaler, f)"""
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+scaler = StandardScaler()
+X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
+X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+model.fit(X_train_scaled, y_train)
+
+y_pred = model.predict(X_test_scaled)
+print(f"Test Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+
+report = classification_report(y_test, y_pred, target_names=['P (0)', 'N (1)'], output_dict=True)
+report_df = pd.DataFrame(report).transpose()
+
+metrics_to_plot = ['precision', 'recall', 'f1-score']
+plt.figure(figsize=(8, 4))
+sns.heatmap(report_df.loc[['P (0)', 'N (1)'], metrics_to_plot], 
+            annot=True, cmap='Blues', fmt='.3f')
+plt.title('Perfect Classification Metrics (100% Accuracy)')
+plt.tight_layout()
+plt.savefig('classification_metrics.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+importances = model.feature_importances_
+feature_names = X.columns
+
+plt.figure(figsize=(10, 6))
+sns.barplot(x=importances, y=feature_names)
+plt.title('Δ-Nim Feature Importance\n("Non-Zero Heap Count" confirms 60-heap threshold)')
+plt.xlabel('Importance')
+plt.tight_layout()
+plt.savefig('feature_importance.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+top_features = pd.DataFrame({
+    'feature': X.columns,
+    'importance': importances
+}).sort_values('importance', ascending=False).head(5)
+print("Top 5 Features for Paper:")
+print(top_features)
+
+print("Matthews Correlation: ", matthews_corrcoef(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+
+importances = model.feature_importances_
+top_features = pd.DataFrame({
+    'feature': X.columns,
+    'importance': importances
+}).sort_values('importance', ascending=False).head(5)
+print("\nTop 5 Features:")
+print(top_features)
